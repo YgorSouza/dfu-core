@@ -188,13 +188,29 @@ impl<IO: DfuIo> DfuSansIo<IO> {
                 memory_layout,
                 ..
             } => {
-                let address = self.override_address.unwrap_or(*address);
+                let address = *address;
+                let offset = self
+                    .override_address
+                    .unwrap_or(address)
+                    .saturating_sub(address);
+                let skipped_pages = memory_layout
+                    .as_ref()
+                    .iter()
+                    .enumerate()
+                    .scan(offset, |offset, (index, size)| {
+                        let prev_offset = *offset;
+                        *offset = offset.saturating_sub(*size);
+                        Some((index, prev_offset))
+                    })
+                    .find_map(|(i, offset)| (offset == 0).then_some(i))
+                    .unwrap_or(0);
+                let address = self.override_address.unwrap_or(address);
                 (
                     download::ProtocolData::Dfuse(download::DfuseProtocolData {
                         address,
                         erased_pos: address,
                         address_set: false,
-                        memory_layout: memory_layout.as_ref(),
+                        memory_layout: &memory_layout.as_ref()[skipped_pages..],
                     }),
                     address.checked_add(length).ok_or(Error::NoSpaceLeft)?,
                 )
